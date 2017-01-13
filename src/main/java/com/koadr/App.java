@@ -16,9 +16,10 @@ public class App {
         final ConsoleReporter reporter = ConsoleReporter.forRegistry(registry).build();
         reporter.start(1000, TimeUnit.MILLISECONDS);
         final ActorSystem system = ActorSystem.create("MetrixSystem");
+        ActorRef intActor = system.actorOf(RandomIntegerActor.props(registry));
         int counter = 10;
         while (counter > 0) {
-            ActorRef saga = system.actorOf(SagaActor.props(registry, activeSagas));
+            ActorRef saga = system.actorOf(SagaActor.props(registry, activeSagas, intActor));
             saga.tell(RandomIntegerActor.GetInteger.getInstance(), ActorRef.noSender());
             counter--;
         }

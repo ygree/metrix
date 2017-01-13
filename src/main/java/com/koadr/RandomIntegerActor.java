@@ -15,7 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 public class RandomIntegerActor extends AbstractLoggingActor {
-    private final Queue<String> queue = new LinkedList<>();
+    private final Queue<ActorRef> queue = new LinkedList<>();
 
     public static class GetInteger {
         private static GetInteger ourInstance = new GetInteger();
@@ -43,14 +43,14 @@ public class RandomIntegerActor extends AbstractLoggingActor {
                         match(GetInteger.class, s -> {
                             String PID = UUID.randomUUID().toString();
                             log().info("Process {} added to queue", PID);
-                            queue.add(PID);
+                            queue.add(sender());
                         }).match(
                             Ticker.class, t -> {
                                 if (!queue.isEmpty()) {
-                                    queue.remove();
+                                    ActorRef orgSender = queue.remove();
                                     int value = new Random().nextInt();
                                     log().info("{} generated", value);
-                                    context().parent().tell(value, ActorRef.noSender());
+                                    orgSender.tell(value, ActorRef.noSender());
                                 }
                             }
                         ).
@@ -64,7 +64,7 @@ public class RandomIntegerActor extends AbstractLoggingActor {
                 system().
                 scheduler().
                 schedule(
-                        Duration.create(5000, TimeUnit.MILLISECONDS),
+                        Duration.create(500, TimeUnit.MILLISECONDS),
                         Duration.create(500, TimeUnit.MILLISECONDS),
                         () -> self().tell(Ticker.TICKER, ActorRef.noSender()),
                         context().dispatcher()

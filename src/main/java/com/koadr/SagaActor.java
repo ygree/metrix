@@ -14,18 +14,17 @@ public class SagaActor extends AbstractLoggingActor {
     private final MetricRegistry registry;
     private final Counter activeSagas;
 
-    static Props props(MetricRegistry registry, Counter activeSagas) {
-        return Props.create(SagaActor.class, () -> new SagaActor(registry, activeSagas));
+    static Props props(MetricRegistry registry, Counter activeSagas, ActorRef intActor) {
+        return Props.create(SagaActor.class, () -> new SagaActor(registry, activeSagas, intActor));
     }
 
-    SagaActor(MetricRegistry registry, Counter activeSagas) {
+    SagaActor(MetricRegistry registry, Counter activeSagas, ActorRef intActor) {
         this.registry = registry;
         this.activeSagas = activeSagas;
 
         receive(
                 ReceiveBuilder.
                         match(RandomIntegerActor.GetInteger.class, s -> {
-                            ActorRef intActor = context().actorOf(RandomIntegerActor.props(registry));
                             intActor.tell(s,self());
                         }).match(Integer.class, n -> {
                             sagaState.setNumber(n);
