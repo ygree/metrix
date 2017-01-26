@@ -5,49 +5,77 @@ import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.japi.pf.ReceiveBuilder;
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.MetricRegistry;
+
+import static com.koadr.RandomIntegerActor.GetInteger;
 
 public class SagaActor extends AbstractLoggingActor {
 
     private final SagaState sagaState = new SagaState(Integer.MAX_VALUE, "");
-    private final MetricRegistry registry;
-    private final Counter activeSagas;
+    private final Metrics metrics;
+    private Timer timer;
+    private final Counter counter;
 
-    static Props props(MetricRegistry registry, Counter activeSagas, ActorRef intActor) {
-        return Props.create(SagaActor.class, () -> new SagaActor(registry, activeSagas, intActor));
+    static Props props(Metrics metrics,ActorRef intActor, ActorRef wordActor) {
+        return Props.create(SagaActor.class, () -> new SagaActor(metrics, intActor, wordActor));
     }
 
-    SagaActor(MetricRegistry registry, Counter activeSagas, ActorRef intActor) {
-        this.registry = registry;
-        this.activeSagas = activeSagas;
+    public static class Process {
+        private String word;
+
+        public Process(String word) {
+            this.word = word;
+        }
+
+        public String getWord() {
+            return word;
+        }
+    }
+
+    SagaActor(Metrics metrics,ActorRef intActor, ActorRef wordActor) {
+        this.metrics = metrics;
+        this.counter = metrics.startCounter(this.getClass().getCanonicalName() + ".active");
 
         receive(
-                ReceiveBuilder.
-                        match(RandomIntegerActor.GetInteger.class, s -> {
-                            intActor.tell(s,self());
-                        }).match(Integer.class, n -> {
-                            sagaState.setNumber(n);
+                ReceiveBuilder.match(Process.class, p -> {
+                    intActor.tell(GetInteger.getInstance(), self());
+                    wordActor.tell(p.getWord(), self());
+                }).
+                    match(GetInteger.class, s -> {
+                        intActor.tell(s,self());
+                    }).match(Integer.class, n -> {
+                        sagaState.setNumber(n);
+                        if (isComplete()) {
+                            log().info("Process finished: {}", sagaState);
                             context().stop(self());
-                        }).match(
-                        String.class, s -> {
-                            ActorRef wordAppender = context().actorOf(RandWordAppendActor.props(registry));
-                            wordAppender.tell(s,self());
-                        }).match(RandWordAppendActor.Word.class, w -> {
-                             sagaState.setWord(w.getWord());
-                        }).matchAny(o -> log().warning("received unknown message {}", o)).build()
+                        }
+                    }).match(
+                    String.class, s -> {
+                        wordActor.tell(s,self());
+                    }).match(RandWordAppendActor.Word.class, w -> {
+                        sagaState.setWord(w.getWord());
+                        if (isComplete()) {
+                            log().info("Process finished: {}", sagaState);
+                            context().stop(self());
+                        }
+                    }).matchAny(o -> log().warning("received unknown message {}", o)).build()
         );
 
 
     }
 
+    private Boolean isComplete() {
+        return sagaState.getNumber() < Integer.MAX_VALUE && !sagaState.getWord().isEmpty();
+    }
+
     @Override
     public void preStart() throws Exception {
-        activeSagas.inc();
+        timer = metrics.processTime(this.getClass().getCanonicalName() + ".time");
+        counter.increment();
     }
 
     @Override
     public void postStop() throws Exception {
-        activeSagas.dec();
+        timer.stop();
+        counter.decrement();
     }
 }

@@ -5,17 +5,18 @@ import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.japi.pf.ReceiveBuilder;
+import com.codahale.metrics.Gauge;
 import com.codahale.metrics.MetricRegistry;
 import scala.concurrent.duration.Duration;
 
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Random;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 public class RandomIntegerActor extends AbstractLoggingActor {
     private final Queue<ActorRef> queue = new LinkedList<>();
+    private final Metrics metrics;
 
     public static class GetInteger {
         private static GetInteger ourInstance = new GetInteger();
@@ -28,24 +29,21 @@ public class RandomIntegerActor extends AbstractLoggingActor {
         }
     }
 
-    static Props props(MetricRegistry registry) {
-        return Props.create(RandomIntegerActor.class, () -> new RandomIntegerActor(registry));
-    }
-
-    enum Ticker {
-        TICKER
+    static Props props(Metrics metrics) {
+        return Props.create(RandomIntegerActor.class, () -> new RandomIntegerActor(metrics));
     }
 
 
-    RandomIntegerActor(MetricRegistry registry) {
+    RandomIntegerActor(Metrics metrics) {
+        this.metrics = metrics;
+        registerQueue();
+
         receive(
                 ReceiveBuilder.
                         match(GetInteger.class, s -> {
-                            String PID = UUID.randomUUID().toString();
-                            log().info("Process {} added to queue", PID);
                             queue.add(sender());
                         }).match(
-                            Ticker.class, t -> {
+                            Tick.class, t -> {
                                 if (!queue.isEmpty()) {
                                     ActorRef orgSender = queue.remove();
                                     int value = new Random().nextInt();
@@ -58,6 +56,10 @@ public class RandomIntegerActor extends AbstractLoggingActor {
         );
     }
 
+    private void registerQueue() {
+        metrics.measureIntegerQueue(queue);
+    }
+
     @Override
     public void preStart() throws Exception {
         context().
@@ -66,7 +68,7 @@ public class RandomIntegerActor extends AbstractLoggingActor {
                 schedule(
                         Duration.create(500, TimeUnit.MILLISECONDS),
                         Duration.create(500, TimeUnit.MILLISECONDS),
-                        () -> self().tell(Ticker.TICKER, ActorRef.noSender()),
+                        () -> self().tell(Tick.getInstance(), ActorRef.noSender()),
                         context().dispatcher()
                 );
         super.preStart();
