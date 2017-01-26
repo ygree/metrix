@@ -3,6 +3,7 @@ package com.koadr;
 import akka.actor.ActorRef;
 import com.codahale.metrics.ConsoleReporter;
 import com.codahale.metrics.Gauge;
+import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricRegistry;
 
 import java.util.Queue;
@@ -19,19 +20,15 @@ class ReactiveMetrics implements Metrics {
     }
 
     private ReactiveMetrics() {
-        final ConsoleReporter reporter = ConsoleReporter.forRegistry(registry).build();
-        reporter.start(1000, TimeUnit.MILLISECONDS);
+//        final ConsoleReporter reporter = ConsoleReporter.forRegistry(registry).build();
+//        reporter.start(1000, TimeUnit.MILLISECONDS);
+        final JmxReporter jmxReporter = JmxReporter.forRegistry(registry).build();
+        jmxReporter.start();
     }
 
     @Override
-    public void measureIntegerQueue(Queue<ActorRef> queue) {
-        registry.register(name(RandomIntegerActor.class, "size"), (Gauge<Integer>) queue::size);
-    }
-
-    @Override
-    public void measureWordQueue(Queue<RandWordAppendActor.WordProcess> queue) {
-        registry.register(name(RandWordAppendActor.class, "size"), (Gauge<Integer>) queue::size);
-
+    public void measureQueue(String name, Queue<?> queue) {
+        registry.<Gauge>register(name, queue::size);
     }
 
     @Override
@@ -44,5 +41,10 @@ class ReactiveMetrics implements Metrics {
     public Counter startCounter(String name) {
         com.codahale.metrics.Counter counter = registry.counter(name);
         return new ReactiveCounter(counter);
+    }
+
+    @Override
+    public RateMeter measureRate(String name) {
+        return new ReactiveRateMeter(registry.meter(name));
     }
 }

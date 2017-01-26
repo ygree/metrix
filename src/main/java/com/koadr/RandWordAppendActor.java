@@ -5,8 +5,6 @@ import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.japi.pf.ReceiveBuilder;
-import com.codahale.metrics.Gauge;
-import com.codahale.metrics.MetricRegistry;
 import scala.concurrent.duration.Duration;
 
 import java.util.LinkedList;
@@ -20,12 +18,13 @@ import java.util.concurrent.TimeUnit;
 // Time to Process
 
 public class RandWordAppendActor extends AbstractLoggingActor {
-    private final Metrics metrics;
+    private final int interval;
+
     private final Queue<WordProcess> queue = new LinkedList<>();
     private final String[] words = {"quarter","plug","stage","ground","dependence","patch","concentrate","primary","sentiment","account","cope","ambiguous","snake", "mask","register"};
 
-    static Props props(Metrics metrics) {
-        return Props.create(RandWordAppendActor.class, () -> new RandWordAppendActor(metrics));
+    static Props props(Metrics metrics, String name, int interval) {
+        return Props.create(RandWordAppendActor.class, () -> new RandWordAppendActor(metrics, name, interval));
     }
 
     public static class Word {
@@ -57,9 +56,11 @@ public class RandWordAppendActor extends AbstractLoggingActor {
         }
     }
 
-    RandWordAppendActor(Metrics metrics) {
-        this.metrics = metrics;
-        registerQueue();
+    RandWordAppendActor(Metrics metrics, String name, int interval) {
+        this.interval = interval;
+        metrics.measureQueue(name + "/QueueSize", queue);
+        RateMeter tickRate = metrics.measureRate(name + "/TickRate");
+        RateMeter processingRate = metrics.measureRate(name + "/ProcessingRate");
 
         receive(
             ReceiveBuilder.
@@ -68,20 +69,26 @@ public class RandWordAppendActor extends AbstractLoggingActor {
                     queue.add(p);
                     log().info("{} passed", s);
                 }).match(Tick.class, t -> {
+                    tickRate.mark();
                     if (!queue.isEmpty()) {
+                        processingRate.mark();
                         WordProcess process = queue.remove();
                         String word = process.getWord();
                         int rnd = new Random().nextInt(words.length);
                         String appendee = words[rnd];
                         log().info("{} processed", process.getWord() + appendee);
+                        context().system().scheduler().scheduleOnce(
+                                Duration.create(500, TimeUnit.MILLISECONDS),
+                                process.getRef(),
+                                new Word(word + appendee),
+                                context().dispatcher(),
+                                ActorRef.noSender()
+                        );
+//                        Thread.sleep(500);
                         process.getRef().tell(new Word(word + appendee), ActorRef.noSender());
                     }
-                }).matchAny(o -> log().warning("received unknown message")).build()
+                }).matchAny(o -> log().warning("received unknown message {}", o)).build()
         );
-    }
-
-    private void registerQueue() {
-        metrics.measureWordQueue(queue);
     }
 
     @Override
@@ -90,8 +97,8 @@ public class RandWordAppendActor extends AbstractLoggingActor {
                 system().
                 scheduler().
                 schedule(
-                        Duration.create(500, TimeUnit.MILLISECONDS),
-                        Duration.create(50, TimeUnit.MILLISECONDS),
+                        Duration.create(interval, TimeUnit.MILLISECONDS),
+                        Duration.create(interval, TimeUnit.MILLISECONDS),
                         () -> self().tell(Tick.getInstance(), sender()),
                         context().dispatcher()
                 );
